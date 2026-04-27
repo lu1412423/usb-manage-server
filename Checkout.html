@@ -1,0 +1,402 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0"/>
+<title>技改狗借还管理（共享版）</title>
+<style>
+body{max-width:800px;margin:30px auto;padding:0 15px;font-family:system-ui}
+.usb{border:1px solid #ddd;border-radius:10px;padding:15px;margin:10px 0;display:flex;justify-content:space-between;align-items:center;flex-wrap:wrap}
+.usb-info{flex:1;min-width:200px}
+.usb-actions{margin-left:10px}
+.status{display:inline-block;padding:4px 10px;border-radius:6px;font-size:14px;margin:5px 0}
+.ok{background:#e6ffe6;color:#006600}
+.no{background:#ffe6e6;color:#990000}
+input,select,button{width:100%;padding:10px;margin:6px 0;border:1px solid #ccc;border-radius:6px;box-sizing:border-box}
+button{background:#007bff;color:white;border:none;cursor:pointer;transition:background 0.3s}
+button:hover{background:#0056b3}
+button.danger{background:#dc3545}
+button.danger:hover{background:#c82333}
+button.success{background:#28a745}
+button.success:hover{background:#218838}
+h2{text-align:center;color:#333}
+h3{color:#444;border-bottom:1px solid #eee;padding-bottom:8px}
+.section{margin:20px 0;padding:15px;border:1px solid #eee;border-radius:8px}
+.flex-row{display:flex;gap:10px;margin:10px 0}
+.flex-row > div{flex:1}
+.stats{display:flex;gap:10px;margin:15px 0;flex-wrap:wrap}
+.stat-item{flex:1;min-width:120px;padding:10px;border-radius:8px;background:#f8f9fa;text-align:center}node server.js
+.log-container{max-height:200px;overflow-y:auto;border:1px solid #eee;padding:10px;border-radius:8px;margin:10px 0;font-size:14px;line-height:1.5}
+.log-item{border-bottom:1px dashed #eee;padding:5px 0;color:#666}
+.log-item:last-child{border-bottom:none}
+.modal{display:none;position:fixed;top:0;left:0;width:100%;height:100%;background:rgba(0,0,0,0.5);justify-content:center;align-items:center;z-index:999}
+.modal-content{background:white;padding:20px;border-radius:10px;width:90%;max-width:400px}
+.close-modal{float:right;cursor-pointer;font-size:20px;color:#666}
+.import-export{margin:10px 0}
+</style>
+</head>
+
+<body>
+<h2>技改狗借还管理（共享版）</h2>
+
+<div class="stats">
+  <div class="stat-item">
+    <div>总设备数</div>
+    <div id="total-count" style="font-size:24px;font-weight:bold">0</div>
+  </div>
+  <div class="stat-item">
+    <div>可借用</div>
+    <div id="available-count" style="font-size:24px;font-weight:bold;color:#006600">0</div>
+  </div>
+  <div class="stat-item">
+    <div>已借出</div>
+    <div id="borrowed-count" style="font-size:24px;font-weight:bold;color:#990000">0</div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>设备列表</h3>
+  <div id="list"></div>
+</div>
+
+<div class="section">
+  <h3>借还操作</h3>
+  <div class="flex-row">
+    <div>
+      <h4>借用</h4>
+      <select id="selBorrow"></select>
+      <input id="name" placeholder="请输入姓名">
+      <button onclick="borrow()">确认借用</button>
+    </div>
+    <div>
+      <h4>归还</h4>
+      <select id="selReturn"></select>
+      <input id="returnName" placeholder="输入归还人">
+      <button onclick="returnIt()">确认归还</button>
+    </div>
+  </div>
+</div>
+
+<div class="section">
+  <h3>操作日志</h3>
+  <div class="log-container" id="log-list"></div>
+</div>
+
+<div class="section import-export">
+  <h3>数据备份与恢复</h3>
+  <div class="flex-row">
+    <div>
+      <button onclick="exportData()" class="success">导出数据</button>
+    </div>
+    <div>
+      <input type="file" id="import-file" accept=".json" onchange="importData(event)">
+      <button onclick="document.getElementById('import-file').click()">导入数据</button>
+    </div>
+  </div>
+</div>
+
+<!-- 设备管理 已移动到最后 -->
+<div class="section">
+  <h3>设备管理</h3>
+  <div class="flex-row">
+    <div>
+      <input id="add-usb-id" placeholder="设备编号（数字）">
+      <button onclick="addUsb()" class="success">添加设备</button>
+    </div>
+    <div>
+      <select id="del-usb-select"></select>
+      <button onclick="deleteUsb()" class="danger">删除设备</button>
+    </div>
+  </div>
+</div>
+
+<div class="modal" id="edit-modal">
+  <div class="modal-content">
+    <span class="close-modal" onclick="closeModal()">&times;</span>
+    <h4>编辑设备信息</h4>
+    <input id="edit-id" type="hidden">
+    <input id="edit-user" placeholder="借用人">
+    <select id="edit-status">
+      <option value="可借用">可借用</option>
+      <option value="已借出">已借出</option>
+    </select>
+    <button onclick="saveEdit()" class="success">保存修改</button>
+  </div>
+</div>
+
+<script>
+// 后端API基础地址（自动适配当前域名）
+const API_BASE = location.origin + '/api';
+let data = []; // 设备数据
+let logs = []; // 日志数据
+
+// ==================== 通用请求函数 ====================
+async function request(url, method = 'GET', data = null) {
+  const options = {
+    method,
+    headers: { 'Content-Type': 'application/json' },
+  };
+  if (data) options.body = JSON.stringify(data);
+  
+  try {
+    const res = await fetch(`${API_BASE}${url}`, options);
+    const result = await res.json();
+    if (!res.ok) throw new Error(result.error || '请求失败');
+    return result;
+  } catch (err) {
+    alert(err.message);
+    throw err; // 抛出错误，方便上层处理
+  }
+}
+
+// ==================== 数据加载/保存 ====================
+// 加载所有设备
+async function loadDevices() {
+  const devices = await request('/devices');
+  data = devices;
+  updateStats();
+}
+
+// 加载所有日志
+async function loadLogs() {
+  const logList = await request('/logs');
+  logs = logList;
+  renderLogs();
+}
+
+// 添加日志（调用后端接口）
+async function addLog(action, content) {
+  const time = new Date().toLocaleString('zh-CN');
+  await request('/logs', 'POST', { time, action, content });
+  // 重新加载日志
+  await loadLogs();
+}
+
+// 更新统计数
+function updateStats() {
+  const total = data.length;
+  const available = data.filter(u=>u.status=='可借用').length;
+  const borrowed = data.filter(u=>u.status=='已借出').length;
+  
+  document.getElementById('total-count').textContent = total;
+  document.getElementById('available-count').textContent = available;
+  document.getElementById('borrowed-count').textContent = borrowed;
+}
+
+// ==================== 页面渲染 ====================
+async function render() {
+  await loadDevices(); // 先加载最新设备数据
+  
+  // 渲染设备列表
+  let list = '';
+  data.forEach(u=>{
+    let cls = u.status=='可借用' ? 'ok' : 'no';
+    list += `
+    <div class="usb">
+      <div class="usb-info">
+        <div><strong>设备编号：${u.id}</strong></div>
+        <div class="status ${cls}">${u.status}</div>
+        <div>借用人：${u.user || '无'}</div>
+        ${u.borrowTime ? `<div>借用时间：${u.borrowTime}</div>` : ''}
+        ${u.lastReturnUser ? `<div>最后归还：${u.lastReturnUser} ${u.lastReturnTime}</div>` : ''}
+      </div>
+      <div class="usb-actions">
+        <button onclick="openEditModal(${u.id})" style="width:auto;padding:5px 10px">编辑</button>
+      </div>
+    </div>`;
+  });
+  document.getElementById('list').innerHTML = list;
+
+  // 渲染借用下拉框
+  let b = '<option value="">选择设备</option>';
+  data.filter(u=>u.status=='可借用').forEach(u=>{
+    b+=`<option value="${u.id}">设备${u.id}</option>`;
+  });
+  document.getElementById('selBorrow').innerHTML = b;
+
+  // 渲染归还下拉框
+  let r = '<option value="">选择设备</option>';
+  data.filter(u=>u.status=='已借出').forEach(u=>{
+    r+=`<option value="${u.id}">设备${u.id}（${u.user}）</option>`;
+  });
+  document.getElementById('selReturn').innerHTML = r;
+
+  // 渲染删除下拉框
+  let d = '<option value="">选择设备</option>';
+  data.forEach(u=>{
+    d+=`<option value="${u.id}">设备${u.id} ${u.status=='已借出' ? '（已借出）' : ''}</option>`;
+  });
+  document.getElementById('del-usb-select').innerHTML = d;
+
+  // 加载日志
+  await loadLogs();
+}
+
+// 渲染日志
+function renderLogs() {
+  let logHtml = '';
+  logs.forEach(log=>{
+    logHtml += `<div class="log-item">[${log.time}] ${log.action}：${log.content}</div>`;
+  });
+  document.getElementById('log-list').innerHTML = logHtml || '<div style="text-align:center;color:#999">暂无操作日志</div>';
+}
+
+// ==================== 借还操作 ====================
+async function borrow() {
+  let id = document.getElementById('selBorrow').value;
+  let name = document.getElementById('name').value.trim();
+  
+  if(!id || !name) return alert('请选择设备并输入姓名');
+  
+  const u = data.find(x=>x.id == id);
+  const updateData = {
+    status: '已借出',
+    user: name,
+    borrowTime: new Date().toLocaleString('zh-CN'),
+    lastReturnUser: u.lastReturnUser,
+    lastReturnTime: u.lastReturnTime
+  };
+  
+  // 调用后端更新设备
+  await request(`/devices/${id}`, 'PUT', updateData);
+  // 添加日志
+  await addLog('借用', `用户${name} 借用了设备${id}`);
+  // 重新渲染页面
+  await render();
+  alert('借用成功');
+  document.getElementById('name').value = '';
+}
+
+async function returnIt() {
+  let id = document.getElementById('selReturn').value;
+  let returnName = document.getElementById('returnName').value.trim();
+  
+  if(!id || !returnName) return alert('请选择设备并输入归还人');
+  
+  const u = data.find(x=>x.id == id);
+  const updateData = {
+    status: '可借用',
+    user: '',
+    borrowTime: '',
+    lastReturnUser: returnName,
+    lastReturnTime: new Date().toLocaleString('zh-CN')
+  };
+  
+  // 调用后端更新设备
+  await request(`/devices/${id}`, 'PUT', updateData);
+  // 添加日志
+  await addLog('归还', `用户${returnName} 归还了设备${id}`);
+  // 重新渲染页面
+  await render();
+  alert('归还成功');
+  document.getElementById('returnName').value = '';
+}
+
+// ==================== 设备管理 ====================
+async function addUsb() {
+  let id = document.getElementById('add-usb-id').value.trim();
+  if(!id || isNaN(id)) return alert('请输入有效的数字编号');
+  
+  id = parseInt(id);
+  if(data.find(x=>x.id == id)) return alert('该设备编号已存在');
+  
+  // 调用后端添加设备
+  await request('/devices', 'POST', { id });
+  // 添加日志
+  await addLog('设备管理', `添加了新设备：${id}`);
+  // 重新渲染页面
+  await render();
+  alert('设备添加成功');
+  document.getElementById('add-usb-id').value = '';
+}
+
+async function deleteUsb() {
+  let id = document.getElementById('del-usb-select').value;
+  if(!id) return alert('请选择要删除的设备');
+  
+  // 调用后端删除设备
+  await request(`/devices/${id}`, 'DELETE');
+  // 添加日志
+  await addLog('设备管理', `删除了设备：${id}`);
+  // 重新渲染页面
+  await render();
+  alert('已删除');
+}
+
+// ==================== 编辑设备 ====================
+function openEditModal(id) {
+  const u = data.find(x=>x.id == id);
+  document.getElementById('edit-id').value = id;
+  document.getElementById('edit-user').value = u.user;
+  document.getElementById('edit-status').value = u.status;
+  document.getElementById('edit-modal').style.display = 'flex';
+}
+
+function closeModal() {
+  document.getElementById('edit-modal').style.display = 'none';
+}
+
+async function saveEdit() {
+  const id = parseInt(document.getElementById('edit-id').value);
+  const user = document.getElementById('edit-user').value;
+  const status = document.getElementById('edit-status').value;
+
+  const u = data.find(x=>x.id == id);
+  const updateData = {
+    user,
+    status,
+    borrowTime: status === '可借用' ? '' : u.borrowTime,
+    lastReturnUser: u.lastReturnUser,
+    lastReturnTime: u.lastReturnTime
+  };
+
+  // 调用后端更新设备
+  await request(`/devices/${id}`, 'PUT', updateData);
+  // 添加日志
+  await addLog('编辑设备', `设备${id} 已修改：状态=${status}，借用人=${user}`);
+  // 重新渲染页面
+  await render();
+  closeModal();
+  alert('修改成功！');
+}
+
+// ==================== 数据导入导出 ====================
+async function exportData() {
+  // 调用后端导出数据
+  const exportData = await request('/export');
+  const blob = new Blob([JSON.stringify(exportData, null, 2)], {type: 'application/json'});
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = `技改狗借还数据_${new Date().toLocaleDateString()}.json`;
+  a.click();
+  URL.revokeObjectURL(url);
+  await addLog('数据管理', '导出数据');
+  alert('导出成功');
+}
+
+async function importData(event) {
+  const file = event.target.files[0];
+  if(!file) return;
+  
+  const reader = new FileReader();
+  reader.onload = async (e) => {
+    try {
+      const d = JSON.parse(e.target.result);
+      // 调用后端导入数据
+      await request('/import', 'POST', d);
+      // 重新渲染页面
+      await render();
+      alert('导入成功');
+    } catch(e) {
+      alert('导入失败：' + e.message);
+    }
+  };
+  reader.readAsText(file);
+}
+
+// 页面加载时初始化
+render();
+</script>
+</body>
+</html>

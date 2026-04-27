@@ -1,0 +1,35 @@
+{
+  "devices": [
+    {
+      "id": 1,
+      "status": "已借出",
+      "user": "1",
+      "borrowTime": "2026/4/27 09:43:30",
+      "lastReturnUser": "",
+      "lastReturnTime": ""
+    },
+    {
+      "id": 2,
+      "status": "可借用",
+      "user": "",
+      "borrowTime": "",
+      "lastReturnUser": "",
+      "lastReturnTime": ""
+    },
+    {
+      "id": 3,
+      "status": "可借用",
+      "user": "",
+      "borrowTime": "",
+      "lastReturnUser": "",
+      "lastReturnTime": ""
+    }
+  ],
+  "logs": [
+    {
+      "time": "2026/4/27 09:43:30",
+      "action": "借用",
+      "content": "用户1 借用了设备1"
+    }
+  ]
+}
